@@ -1,0 +1,12 @@
+[package]
+name = "sql_connector"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+config = "0.15.6"
+serde = "1.0.217"
+toml = "0.8.19"
+
+[lib]
+path = "src/lib.rs"
