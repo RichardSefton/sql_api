@@ -1,5 +1,5 @@
 [connection_settings]
 user = "sa"
-server = "localhost"
+server = "127.0.0.1"
 password = "SomeTestPass123!"
 port = "1433"
