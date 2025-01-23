@@ -1,7 +1,7 @@
-use std::net::TcpStream;
-
+use std::io::{Write, Read};
+use std::net::{TcpStream, Shutdown};
 use crate::connection_settings::ConnectionSettings;
-
+use crate::tds_message::TdsMessage;
 /**
  * OCDB Driver
  * 
@@ -14,7 +14,8 @@ use crate::connection_settings::ConnectionSettings;
 struct Connector {
     database: String,
     settings: ConnectionSettings,
-    stream: Option<TcpStream>
+    stream: Option<TcpStream>,
+    authenticated: bool
 }
 
 impl Connector {
@@ -24,7 +25,8 @@ impl Connector {
         Connector {
             database: String::from(db_name),
             settings,
-            stream: None
+            stream: None,
+            authenticated: false
         }
     }
 
@@ -50,6 +52,40 @@ impl Connector {
     pub fn is_connected(&self) -> bool {
         self.stream.is_some()
     }
+
+    pub fn get_stream(&mut self) -> TcpStream {
+        let stream: TcpStream = self.stream.take().expect("No active stream");
+        stream
+    } 
+
+    pub fn authenticate(&mut self) -> Result<bool, String> {
+        if !self.is_connected() {
+            return Err(format!("Not connected to server. Please call connect first"));
+        }
+        
+        let mut message: TdsMessage = TdsMessage::new();
+
+        message.generate_prelogin();
+        message.calc_length();
+
+        let bytes:Vec<u8> = message.to_bytes();
+        for byte in &bytes {
+            print!("0x{:02X} ", byte);
+        }
+        println!();
+
+        let mut stream: TcpStream = self.stream.take().ok_or("No active stream")?;
+
+        let result = stream.write_all(&bytes).map_err(|e| format!("Failed to write to steam: {}", e));
+        println!("result: {:?}", result);
+
+        let mut read_buffer = [0u8; 1024];
+        let size = stream.read(&mut read_buffer).map_err(|e| e.to_string())?;
+
+        println!("response: {:?}, size: {size}", &read_buffer[..size]);
+        
+        Ok(true)
+    }
 }
 
 #[cfg(test)]
@@ -68,11 +104,26 @@ mod tests {
     }
 
     #[test]
+    fn test_connector_get_stream_returns_stream() {
+        let db_name: &str = "sample";
+        let mut con: Connector = Connector::new(db_name);
+
+        let _ = con.connect();
+
+        let stream:TcpStream = con.get_stream();
+
+        let _ = stream.shutdown(Shutdown::Both);
+    }
+
+    #[test]
     fn test_connector_connect_establishes_connection() {
         let db_name: &str = "sample";
         let mut con: Connector = Connector::new(db_name);
 
         let result = con.connect();
+
+        let stream = con.get_stream();
+        let _ = stream.shutdown(Shutdown::Both);
 
         match result {
             Ok(value) => assert_eq!(value, true),
@@ -87,11 +138,12 @@ mod tests {
         let mut con: Connector = Connector {
             database: String::from("sample"),
             settings,
-            stream: None
+            stream: None,
+            authenticated: false
         };
 
         let result = con.connect();
-        
+
         match result {
             Ok(value) => assert_eq!(value, false),
             Err(err) => assert!(err.contains("Failed to connect: No connection could be made because the target machine actively refused it. (os error 10061)"))
@@ -106,6 +158,9 @@ mod tests {
         let _ = con.connect();
 
         assert!(con.is_connected());
+
+        let stream = con.get_stream();
+        let _ = stream.shutdown(Shutdown::Both);
     }
 
     #[test]
@@ -114,5 +169,19 @@ mod tests {
         let con: Connector = Connector::new(db_name);
 
         assert!(!(con.is_connected()));
+    }
+
+    #[test]
+    fn test_connector_can_authenticate() {
+        let db_name = "sample";
+        let mut con: Connector = Connector::new(db_name);
+
+        let _ = con.connect();
+        let result = con.authenticate();
+
+        match result {
+            Ok(value) => assert_eq!(value, true),
+            Err(err) => assert_eq!(err, "")
+        }
     }
 }
